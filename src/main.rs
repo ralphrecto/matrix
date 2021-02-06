@@ -193,18 +193,17 @@ fn render(mut stdout: &mut RawTerminal<Stdout>, state: &State) {
     }
 }
 
-fn read_stdin(mut stdin: &mut AsyncReader) -> Option<Event> {
+fn read_key(mut stdin: &mut AsyncReader) -> Option<u8> {
     return match stdin.bytes().next() {
         Some(event_res) => match event_res {
-             Ok(partial_event) => {
-                let event = parse_event(partial_event, &mut stdin.bytes());
-                return Some(event.unwrap());
-             },
-             Err(_) => panic!("error reading stdin")
+             Ok(evt) => Some(evt),
+             Err(_) => None
         },
         _ => None
     }
 }
+
+const DEFAULT_TRAIL_DENSITY: u32 = 30;
 
 fn main() -> Result<(), Error> {
     let mut stdin = async_stdin();
@@ -214,25 +213,23 @@ fn main() -> Result<(), Error> {
         Err(_) => panic!("cannot get term size")
     };
 
-    let mut state: State = new_state(term_size, 600);
+    let num_trails = (term_size.0 as i32 * term_size.1 as i32) as i32 / DEFAULT_TRAIL_DENSITY as i32;
+
+    let mut state: State = new_state(term_size, num_trails as u32);
 
     write!(stdout, "{}{}{}{}", clear::All, cursor::Goto(1,1), color::Fg(color::Reset), cursor::Hide);
     stdout.flush()?;
 
-    for _ in 0..100 {
+    loop {
         tick(&mut state);
         render(&mut stdout, &state);
 
-        match read_stdin(&mut stdin) {
-            Some(evt) => match evt {
-                Event::Key(k) => match k {
-                    Key::Esc => break,
-                    Key::Char('q') => break,
-                    _ => ()
-                }
+        match read_key(&mut stdin) {
+            Some(k) => match k {
+                b'q' => break,
                 _ => ()
             },
-            None => ()
+            _ => ()
         }
 
         thread::sleep(time::Duration::from_millis(150));
