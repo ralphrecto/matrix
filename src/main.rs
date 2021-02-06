@@ -38,6 +38,7 @@ struct Trail {
     // Generally, it should dim in color as its drawn up. 
     bottom: TermPos,
     len: usize,
+    speed: i32
 }
 struct State {
     trails: Vec<Trail>,
@@ -45,24 +46,27 @@ struct State {
     num_trails: u32
 }
 
-fn new_trail(x: u8, y: u8, len: usize) -> Trail {
+fn new_trail(x: u8, y: u8, len: usize, speed: i32) -> Trail {
     return Trail {
         bottom: TermPos {
             x: x,
             y: y
         },
+        speed: speed,
         len: len
     };
 }
 
 const MAX_TRAIL_LEN: usize = 12;
+const MAX_TRAIL_SPEED: i32 = 5;
 
 fn new_random_trail(term_size: (u16, u16)) -> Trail {
     let x = thread_rng().gen_range(1..term_size.0);
     let y = thread_rng().gen_range(1..term_size.1);
     let len = thread_rng().gen_range(3..MAX_TRAIL_LEN);
+    let speed = thread_rng().gen_range(1..MAX_TRAIL_SPEED);
 
-    return new_trail(x as u8, y as u8, len);
+    return new_trail(x as u8, y as u8, len, speed);
 }
 
 fn new_state(term_size: (u16, u16), num_trails: u32) -> State {
@@ -135,19 +139,21 @@ fn tick(mut state: &mut State) {
 
     // Move each trail down.
     for trail in &mut state.trails {
-        trail.bottom.y += 1;
+        trail.bottom.y += trail.speed as u8;
     }
 }
 
 const PURE_GREEN: Color = Color { r: 0, g: 5, b: 0};
 const DARK_GREEN: Color = Color { r: 0, g: 1, b: 0 };
 
-const CHARSET: &'static [char] = &[
-    'a', 'b', 'c', 'd', 'e', 'f'
+const RAIN_CHARSET: &'static [char] = &[
+    'x', 'A', 'z', 'O',
+    '\u{00D8}', '\u{01C2}', '\u{03A9}', '\u{01E3}', '\u{03FC}',
+    '\u{305B}', '\u{3091}'
 ];
 
 fn gen_char() -> char {
-    return 'x';
+    return RAIN_CHARSET[thread_rng().gen_range(0..RAIN_CHARSET.len())];
 }
 
 fn render_trail(stdout: &mut RawTerminal<Stdout>, trail: &Trail) -> Result<(), Error> {
@@ -191,15 +197,15 @@ fn main() -> Result<(), Error> {
         Err(_) => panic!("cannot get term size")
     };
 
-    let mut state: State = new_state(term_size, 50);
+    let mut state: State = new_state(term_size, 600);
 
     write!(stdout, "{}{}{}{}", clear::All, cursor::Goto(1,1), color::Fg(color::Reset), cursor::Hide);
     stdout.flush()?;
 
     for _ in 0..100 {
-        render(&mut stdout, &state);
         tick(&mut state);
-        thread::sleep(time::Duration::from_millis(200));
+        render(&mut stdout, &state);
+        thread::sleep(time::Duration::from_millis(150));
     }
 
     write!(stdout, "{}{}{}", clear::All, cursor::Goto(1,1), color::Fg(color::Reset));
