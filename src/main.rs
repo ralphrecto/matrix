@@ -1,5 +1,5 @@
 use std::{
-    io::{stdin, stdout, Stdout, Stdin, Write, Error},
+    io::{stdin, stdout, Stdout, Stdin, Write, Error, Read},
     cmp::{min, max},
     fmt,
     thread,
@@ -7,7 +7,11 @@ use std::{
 };
 use termion::{
     terminal_size,
+    async_stdin,
+    AsyncReader,
+    input::{Keys, TermRead},
     raw::{IntoRawMode, RawTerminal},
+    event::{Key, parse_event, Event},
     cursor,
     color,
     clear
@@ -58,7 +62,7 @@ fn new_trail(x: u8, y: u8, len: usize, speed: i32) -> Trail {
 }
 
 const MAX_TRAIL_LEN: usize = 12;
-const MAX_TRAIL_SPEED: i32 = 5;
+const MAX_TRAIL_SPEED: i32 = 3;
 
 fn new_random_trail(term_size: (u16, u16)) -> Trail {
     let x = thread_rng().gen_range(1..term_size.0);
@@ -189,8 +193,21 @@ fn render(mut stdout: &mut RawTerminal<Stdout>, state: &State) {
     }
 }
 
+fn read_stdin(mut stdin: &mut AsyncReader) -> Option<Event> {
+    return match stdin.bytes().next() {
+        Some(event_res) => match event_res {
+             Ok(partial_event) => {
+                let event = parse_event(partial_event, &mut stdin.bytes());
+                return Some(event.unwrap());
+             },
+             Err(_) => panic!("error reading stdin")
+        },
+        _ => None
+    }
+}
+
 fn main() -> Result<(), Error> {
-    let stdint = stdin();
+    let mut stdin = async_stdin();
     let mut stdout = stdout().into_raw_mode()?;
     let term_size: (u16, u16) = match terminal_size() {
         Ok(size) => size,
@@ -205,6 +222,19 @@ fn main() -> Result<(), Error> {
     for _ in 0..100 {
         tick(&mut state);
         render(&mut stdout, &state);
+
+        match read_stdin(&mut stdin) {
+            Some(evt) => match evt {
+                Event::Key(k) => match k {
+                    Key::Esc => break,
+                    Key::Char('q') => break,
+                    _ => ()
+                }
+                _ => ()
+            },
+            None => ()
+        }
+
         thread::sleep(time::Duration::from_millis(150));
     }
 
