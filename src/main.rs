@@ -1,7 +1,6 @@
 use std::{
-    io::{stdin, stdout, Stdout, Stdin, Write, Error, Read},
+    io::{stdout, Stdout, Write, Error, Read},
     cmp::{min, max},
-    fmt,
     thread,
     time
 };
@@ -9,9 +8,7 @@ use termion::{
     terminal_size,
     async_stdin,
     AsyncReader,
-    input::{Keys, TermRead},
     raw::{IntoRawMode, RawTerminal},
-    event::{Key, parse_event, Event},
     cursor,
     color,
     clear
@@ -41,6 +38,7 @@ struct TermPos {
     y: u8
 }
 
+// A Trail is a vertical sequence of characters on the screen.
 #[derive(Debug)]
 struct Trail {
     // Trails are drawn from the bottom up for its len.
@@ -55,14 +53,14 @@ impl Trail {
     const MAX_SPEED: i32 = 3;
 
     fn new(x: u8, y: u8, len: usize, speed: i32) -> Trail {
-        return Trail {
+        Trail {
             bottom: TermPos {
-                x: x,
-                y: y
+                x,
+                y
             },
-            speed: speed,
-            len: len
-        };
+            speed,
+            len
+        }
     }
 
     fn random(term_size: (u16, u16)) -> Trail {
@@ -71,12 +69,12 @@ impl Trail {
         let len = thread_rng().gen_range(3..Trail::MAX_LEN);
         let speed = thread_rng().gen_range(1..Trail::MAX_SPEED);
 
-        return Trail::new(x as u8, y as u8, len, speed);
+        Trail::new(x as u8, y as u8, len, speed)
     }
 
-    fn is_visible(self: &Self, term_size: (u16, u16)) -> bool {
+    fn is_visible(&self, term_size: (u16, u16)) -> bool {
         let top = self.bottom.y as i32 - self.len as i32;
-        return top < term_size.1 as i32;
+        top < term_size.1 as i32
     }
 
     const RAIN_CHARSET: &'static [char] = &[
@@ -86,10 +84,10 @@ impl Trail {
     ];
 
     fn gen_char() -> char {
-        return Trail::RAIN_CHARSET[thread_rng().gen_range(0..Trail::RAIN_CHARSET.len())];
+        Trail::RAIN_CHARSET[thread_rng().gen_range(0..Trail::RAIN_CHARSET.len())]
     }
 
-    fn render(self: &Self, stdout: &mut RawTerminal<Stdout>) -> Result<(), Error> {
+    fn render(&self, stdout: &mut RawTerminal<Stdout>) -> Result<(), Error> {
         let interpolates: Vec<Color> = interpolate(Color::PURE_GREEN, Color::DARK_GREEN, self.len as u8);
 
         for i in 0..self.len {
@@ -107,33 +105,32 @@ impl Trail {
                 cursor::Goto(x as u16, y as u16),
                 color::Fg(color::AnsiValue::rgb(color.r, color.g, color.b)),
                 Trail::gen_char()
-            );
+            )?;
             stdout.flush()?;
         }
 
-        return Ok(());
+        Ok(())
     }
 }
 
+// Holds all relevant state for rendering the digital rain.
 struct State {
     trails: Vec<Trail>,
-    term_size: (u16, u16),
-    num_trails: u32
+    term_size: (u16, u16)
 }
 
 impl State {
     fn new(term_size: (u16, u16), num_trails: u32) -> State {
         let mut trails: Vec<Trail> = vec![];
 
-        for i in 0..num_trails {
+        for _i in 0..num_trails {
             trails.push(Trail::random(term_size));
         }
 
-        return State {
-            trails: trails,
-            term_size: term_size,
-            num_trails: num_trails
-        };
+        State {
+            trails,
+            term_size
+        }
     }
 }
 
@@ -148,7 +145,7 @@ fn compute_step_size(c1: u8, c2: u8, steps: u8) -> i32 {
 
     let step = ((f2 - f1) / fsteps).floor() as i32;
 
-    return if step == 0 { 1 } else { step };
+    if step == 0 { 1 } else { step }
 }
 
 const ANSI_RGB_MAX: u8 = 5;
@@ -158,7 +155,7 @@ fn clip(val: u8, interpolatee_val: u8) -> u8 {
     let min_bound = min(interpolatee_val, ANSI_RGB_MIN);
     let max_bound = max(interpolatee_val, ANSI_RGB_MAX);
 
-    return min(max(min_bound, val), max_bound);
+    min(max(min_bound, val), max_bound)
 }
 
 fn interpolate(c1: Color, c2: Color, steps: u8) -> Vec<Color> {
@@ -175,14 +172,14 @@ fn interpolate(c1: Color, c2: Color, steps: u8) -> Vec<Color> {
         });
     }
 
-    return interpolates;
+    interpolates
 }
 
-fn tick(mut state: &mut State) {
+fn tick(state: &mut State) {
     // Replace trails if they are no longer visible.
     for i in 0..state.trails.len() {
         if !state.trails[i].is_visible(state.term_size) {
-            (&mut state).trails[i] = Trail::random(state.term_size);
+            state.trails[i] = Trail::random(state.term_size);
         }
     }
 
@@ -192,15 +189,17 @@ fn tick(mut state: &mut State) {
     }
 }
 
-fn render(mut stdout: &mut RawTerminal<Stdout>, state: &State) {
-    write!(stdout, "{}", clear::All);
+fn render(mut stdout: &mut RawTerminal<Stdout>, state: &State) -> Result<(), Error> {
+    write!(stdout, "{}", clear::All)?;
     for trail in &state.trails {
-        trail.render(&mut stdout);
+        trail.render(&mut stdout)?;
     }
+
+    Ok(())
 }
 
-fn read_key(mut stdin: &mut AsyncReader) -> Option<u8> {
-    return match stdin.bytes().next() {
+fn read_key(stdin: &mut AsyncReader) -> Option<u8> {
+    match stdin.bytes().next() {
         Some(event_res) => match event_res {
              Ok(evt) => Some(evt),
              Err(_) => None
@@ -209,9 +208,9 @@ fn read_key(mut stdin: &mut AsyncReader) -> Option<u8> {
     }
 }
 
-fn clear_screen(mut stdout: &mut RawTerminal<Stdout>) -> Result<(), Error>  {
-    write!(stdout, "{}{}{}", clear::All, cursor::Goto(1,1), color::Fg(color::Reset));
-    return stdout.flush();
+fn clear_screen(stdout: &mut RawTerminal<Stdout>) -> Result<(), Error>  {
+    write!(stdout, "{}{}{}", clear::All, cursor::Goto(1,1), color::Fg(color::Reset))?;
+    stdout.flush()
 }
 
 // Will render 1 trail per $TRAIL_DENSITY terminal squares.
@@ -235,13 +234,10 @@ fn main() -> Result<(), Error> {
     clear_screen(&mut stdout)?;
     loop {
         tick(&mut state);
-        render(&mut stdout, &state);
+        render(&mut stdout, &state)?;
 
         match read_key(&mut stdin) {
-            Some(k) => match k {
-                b'q' => break,
-                _ => ()
-            },
+            Some(b'q') => break,
             _ => ()
         }
 
@@ -249,5 +245,5 @@ fn main() -> Result<(), Error> {
     }
     clear_screen(&mut stdout)?;
 
-    return Ok(());
+    Ok(())
 }
