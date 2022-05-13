@@ -2,7 +2,8 @@ use std::{
     io::{stdout, Stdout, Write, Error, Read},
     cmp::{min, max},
     thread,
-    time
+    time,
+    env
 };
 use termion::{
     terminal_size,
@@ -13,11 +14,11 @@ use termion::{
     color,
     clear
 };
-
 use rand::{
     thread_rng,
     Rng
 };
+use std::str::FromStr;
 
 #[derive(Debug, Clone, Copy)]
 struct Color {
@@ -77,17 +78,11 @@ impl Trail {
         top < term_size.1 as i32
     }
 
-    const RAIN_CHARSET: &'static [char] = &[
-        'x', 'A', 'z', 'O',
-        '\u{00D8}', '\u{01C2}', '\u{03A9}', '\u{01E3}', '\u{03FC}',
-        '\u{305B}', '\u{3091}'
-    ];
-
-    fn gen_char() -> char {
-        Trail::RAIN_CHARSET[thread_rng().gen_range(0..Trail::RAIN_CHARSET.len())]
+    fn gen_char(charset: &Vec<char>) -> char {
+        charset[thread_rng().gen_range(0..charset.len())]
     }
 
-    fn render(&self, stdout: &mut RawTerminal<Stdout>) -> Result<(), Error> {
+    fn render(&self, stdout: &mut RawTerminal<Stdout>, rain_charset: &Vec<char>) -> Result<(), Error> {
         let interpolates: Vec<Color> = interpolate(Color::PURE_GREEN, Color::DARK_GREEN, self.len as u8);
 
         for i in 0..self.len {
@@ -104,7 +99,7 @@ impl Trail {
                 "{}{}{}",
                 cursor::Goto(x as u16, y as u16),
                 color::Fg(color::AnsiValue::rgb(color.r, color.g, color.b)),
-                Trail::gen_char()
+                Trail::gen_char(rain_charset)
             )?;
             stdout.flush()?;
         }
@@ -113,23 +108,72 @@ impl Trail {
     }
 }
 
+// Defaults for Config parameters.
+const DEFAULT_TRAIL_DENSITY: u32 = 30;
+const DEFAULT_RAIN_CHARSET: &'static [char] = &[
+    'x', 'A', 'z', 'O',
+    '\u{00D8}', '\u{01C2}', '\u{03A9}', '\u{01E3}', '\u{03FC}',
+    '\u{305B}', '\u{3091}'
+];
+
+
+// User-controllable parameters that change rendering.
+struct Config {
+    // Will render 1 trail per $TRAIL_DENSITY terminal squares.
+    trail_density: u32,
+    // Set of characters to sample from when displaying the rain.
+    rain_charset: Vec<char>
+}
+
+impl Config {
+    pub fn create() -> Config {
+        let trail_density_env: Option<u32> = env::var("TRAIL_DENSITY").ok()
+            .and_then(|s| u32::from_str(&s).ok());
+
+        let trail_density: u32 = match trail_density_env {
+            Some(d) => d,
+            _ => DEFAULT_TRAIL_DENSITY
+        };
+
+        let rain_charset_env: Option<Vec<char>> = env::var("RAIN_CHARSET").ok()
+            .and_then(|s| Some(s.chars().collect()));
+
+        let rain_charset: Vec<char> = match rain_charset_env {
+            Some(cs) => cs,
+            _ => DEFAULT_RAIN_CHARSET.iter().map(|c| *c).collect()
+        };
+
+        Config {
+            trail_density: trail_density,
+            rain_charset: rain_charset
+        }
+    }
+}
+
 // Holds all relevant state for rendering the digital rain.
 struct State {
+    // Current trails that are rendered on the terminal.
     trails: Vec<Trail>,
-    term_size: (u16, u16)
+    // Dimensions (in characters) of the terminal.
+    term_size: (u16, u16),
+    // Other params used when rendering.
+    config: Config
 }
 
 impl State {
-    fn new(term_size: (u16, u16), num_trails: u32) -> State {
-        let mut trails: Vec<Trail> = vec![];
+    fn new(term_size: (u16, u16)) -> State {
+        let config =  Config::create();
+        let num_trails = (term_size.0 as i32 * term_size.1 as i32) as i32 / config.trail_density as i32;
 
+        let mut trails: Vec<Trail> = vec![];
         for _i in 0..num_trails {
             trails.push(Trail::random(term_size));
         }
 
         State {
             trails,
-            term_size
+            term_size,
+            config
         }
     }
 }
@@ -192,7 +236,7 @@ fn tick(state: &mut State) {
 fn render(mut stdout: &mut RawTerminal<Stdout>, state: &State) -> Result<(), Error> {
     write!(stdout, "{}", clear::All)?;
     for trail in &state.trails {
-        trail.render(&mut stdout)?;
+        trail.render(&mut stdout, &state.config.rain_charset)?;
     }
 
     Ok(())
@@ -213,9 +257,6 @@ fn clear_screen(stdout: &mut RawTerminal<Stdout>) -> Result<(), Error>  {
     stdout.flush()
 }
 
-// Will render 1 trail per $TRAIL_DENSITY terminal squares.
-const DEFAULT_TRAIL_DENSITY: u32 = 30;
-
 fn main() -> Result<(), Error> {
     // Set up stdin/stdout.
     let mut stdin = async_stdin();
@@ -227,8 +268,7 @@ fn main() -> Result<(), Error> {
         Err(_) => panic!("cannot get term size")
     };
 
-    let num_trails = (term_size.0 as i32 * term_size.1 as i32) as i32 / DEFAULT_TRAIL_DENSITY as i32;
-    let mut state: State = State::new(term_size, num_trails as u32);
+    let mut state: State = State::new(term_size);
 
     // Enter main loop.
     clear_screen(&mut stdout)?;
